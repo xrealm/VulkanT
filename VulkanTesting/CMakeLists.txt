@@ -13,8 +13,8 @@ include_directories("${BASEPATH}")
 
 find_package(PkgConfig REQUIRED)
 
+pkg_search_module(GLFW3 3.3 REQUIRED glfw3)
 find_package(GLFW3 3.3 REQUIRED glfw3)
-#pkg_search_module(GLFW3 3.3 REQUIRED glfw3)
 if(GLFW3_FOUND)
     message(STATUS "Found GLFW, Including and Linking now")
     include_directories(${GLFW3_INCLUDE_DIRS})
