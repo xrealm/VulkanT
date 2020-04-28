@@ -87,7 +87,7 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-        {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
         {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
         {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
@@ -189,6 +189,12 @@ private:
      */
     VkSemaphore renderFinishedSemaphore;
 
+    /**
+     * 顶点缓冲
+     */
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -210,6 +216,7 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createVertexBuffer();
         createCommandBuffers();
         createSemaphore();
     }
@@ -227,6 +234,8 @@ private:
         vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
         vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
         cleanupSwapChain();
+        vkDestroyBuffer(device, vertexBuffer, nullptr);
+        vkFreeMemory(device, vertexBufferMemory, nullptr);
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDevice(device, nullptr);
         if (enableValidationLayers) {
@@ -254,6 +263,65 @@ private:
             vkDestroyImageView(device, swapChainImageViews[i], nullptr);
         }
         vkDestroySwapchainKHR(device, swapChain, nullptr);
+    }
+
+    /**
+     * 创建缓冲区
+     */
+    void createVertexBuffer() {
+        VkBufferCreateInfo bufferInfo = {};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        //缓冲区字节大小
+        bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+        //指定缓冲区数据如何使用，这里是顶点缓冲
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        //缓冲区也可以共享，这里用于图形队列，不共享
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(device, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create vertex buffer.");
+        }
+
+        //缓冲区分配内存
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(device, vertexBuffer, &memoryRequirements);
+        VkMemoryAllocateInfo allocateInfo = {};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.allocationSize = memoryRequirements.size;
+        allocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits,
+                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(device, &allocateInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate vertex buffer memory.");
+        }
+
+        //分配成功，关联到缓冲区
+        vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+        //填充顶点缓冲区，将缓冲区内存映射到cpu可访问的内存中
+        void* data;
+        vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+        //将顶点数据拷贝到映射内存
+        memcpy(data, vertices.data(), bufferInfo.size);
+        //取消映射
+        vkUnmapMemory(device, vertexBufferMemory);
+    }
+
+    /**
+     * 找到正确的内存类型
+     * @param typeFilter
+     * @param properties
+     * @return
+     */
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memoryProperties;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+            if ((typeFilter & (1 << i)) && (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+        throw std::runtime_error("failed to find suitable memory type.");
     }
 
     void recreateSwapChain() {
@@ -382,8 +450,12 @@ private:
 
             //绑定图形管线
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicPipeline);
+            //绑定顶点缓冲区
+            VkBuffer vertexBuffers[] = {vertexBuffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
             //绘制三角形，有3个顶点需要绘制
-            vkCmdDraw(commandBuffers[i], 3, 1, 0, 0);
+            vkCmdDraw(commandBuffers[i], vertices.size(), 1, 0, 0);
             //render pass执行完，结束渲染作业
             vkCmdEndRenderPass(commandBuffers[i]);
             //停止记录命令缓冲区
